@@ -1,17 +1,13 @@
-run = "./gotunnel-unified --domain ${REPL_SLUG}.${REPL_OWNER}.repl.co --log-level info"
-entrypoint = "main.go"
-
-[env]
-DOMAIN = "${REPL_SLUG}.${REPL_OWNER}.repl.co"
+run = "go build -o gotunnel-unified ./cmd/unified && ./gotunnel-unified --log-level info"
+entrypoint = "cmd/unified/main.go"
+modules = ["go-1.21"]
 
 [nix]
-channel = "stable-23_11"
+channel = "stable-24_05"
+
+[env]
+DOMAIN = "gotunnel.repl.co"
 
 [deployment]
-run = ["./gotunnel-unified", "--domain", "${REPL_SLUG}.${REPL_OWNER}.repl.co", "--log-level", "info"]
-build = ["go", "build", "-o", "gotunnel-unified", "./cmd/unified"]
+run = ["sh", "-c", "go build -o gotunnel-unified ./cmd/unified && ./gotunnel-unified --log-level info"]
 deploymentTarget = "cloudrun"
-
-[[ports]]
-localPort = 8080
-externalPort = 80
