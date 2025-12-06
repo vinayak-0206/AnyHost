@@ -1,4 +1,4 @@
-server_addr: "localhost:9001"
+server_addr: "ws://localhost:8082/tunnel"
 token: "dev-token"
 tunnels:
   - subdomain: "myapi"

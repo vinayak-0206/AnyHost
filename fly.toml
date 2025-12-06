@@ -1,0 +1,39 @@
+app = "gotunnel-server"
+primary_region = "sjc"
+
+[build]
+
+[env]
+  LOG_LEVEL = "info"
+
+# HTTP service for public traffic
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [services.concurrency]
+    hard_limit = 1000
+    soft_limit = 800
+
+# TCP service for client connections
+[[services]]
+  internal_port = 9000
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 9000
+
+[checks]
+  [checks.health]
+    port = 8080
+    type = "tcp"
+    interval = "15s"
+    timeout = "2s"

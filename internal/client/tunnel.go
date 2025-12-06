@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/anyhost/gotunnel/internal/common"
 	"github.com/anyhost/gotunnel/internal/protocol"
+	"github.com/gorilla/websocket"
 	"github.com/hashicorp/yamux"
 )
 
@@ -107,13 +110,32 @@ func NewTunnel(cfg *common.ClientConfig, logger *slog.Logger) (*Tunnel, error) {
 }
 
 // Connect establishes a connection to the tunnel server.
+// It auto-detects whether to use WebSocket or raw TCP based on the server address.
 func (t *Tunnel) Connect() error {
 	t.setState(TunnelStateConnecting)
 
 	t.logger.Info("connecting to server", slog.String("addr", t.config.ServerAddr))
 
-	// Dial server
-	conn, err := net.DialTimeout("tcp", t.config.ServerAddr, 10*time.Second)
+	var conn net.Conn
+	var err error
+
+	// Check if server address is a WebSocket URL
+	if strings.HasPrefix(t.config.ServerAddr, "ws://") || strings.HasPrefix(t.config.ServerAddr, "wss://") {
+		conn, err = t.dialWebSocket()
+	} else if strings.Contains(t.config.ServerAddr, "://") {
+		// HTTP/HTTPS URL - convert to WebSocket
+		wsURL := strings.Replace(t.config.ServerAddr, "https://", "wss://", 1)
+		wsURL = strings.Replace(wsURL, "http://", "ws://", 1)
+		if !strings.HasSuffix(wsURL, "/tunnel") {
+			wsURL = strings.TrimSuffix(wsURL, "/") + "/tunnel"
+		}
+		t.config.ServerAddr = wsURL
+		conn, err = t.dialWebSocket()
+	} else {
+		// Raw TCP connection
+		conn, err = t.dialTCP()
+	}
+
 	if err != nil {
 		t.setState(TunnelStateDisconnected)
 		return fmt.Errorf("failed to connect to server: %w", err)
@@ -142,6 +164,38 @@ func (t *Tunnel) Connect() error {
 	t.logger.Info("connected to server", slog.String("session_id", t.sessionID))
 
 	return nil
+}
+
+// dialTCP establishes a raw TCP connection to the server.
+func (t *Tunnel) dialTCP() (net.Conn, error) {
+	return net.DialTimeout("tcp", t.config.ServerAddr, 10*time.Second)
+}
+
+// dialWebSocket establishes a WebSocket connection to the server.
+func (t *Tunnel) dialWebSocket() (net.Conn, error) {
+	t.logger.Debug("connecting via WebSocket", slog.String("url", t.config.ServerAddr))
+
+	// Parse and validate URL
+	u, err := url.Parse(t.config.ServerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid WebSocket URL: %w", err)
+	}
+
+	// Ensure path ends with /tunnel
+	if !strings.HasSuffix(u.Path, "/tunnel") {
+		u.Path = strings.TrimSuffix(u.Path, "/") + "/tunnel"
+	}
+
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
+	}
+
+	ws, _, err := dialer.Dial(u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("WebSocket dial failed: %w", err)
+	}
+
+	return common.NewWSConn(ws), nil
 }
 
 // performHandshake performs the initial handshake with the server.
