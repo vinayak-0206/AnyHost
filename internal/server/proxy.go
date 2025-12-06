@@ -149,10 +149,23 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request) {
 		logger.Debug("WebSocket upgrade request")
 	}
 
-	// Lookup tunnel by host
+	// Try to lookup tunnel by host (subdomain-based routing)
 	entry, found := p.registry.LookupByHost(r.Host)
+
+	// If not found by host, try path-based routing: /subdomain/...
 	if !found {
-		logger.Debug("no tunnel found for host")
+		entry, found = p.lookupByPath(r)
+	}
+
+	// Also check X-Tunnel-Subdomain header as fallback
+	if !found {
+		if subdomain := r.Header.Get("X-Tunnel-Subdomain"); subdomain != "" {
+			entry, found = p.registry.Lookup(subdomain)
+		}
+	}
+
+	if !found {
+		logger.Debug("no tunnel found for host or path")
 		http.Error(w, "Tunnel not found", http.StatusNotFound)
 		return
 	}
@@ -374,4 +387,35 @@ func isConnectionReset(err error) bool {
 	errStr := err.Error()
 	return strings.Contains(errStr, "connection reset by peer") ||
 		strings.Contains(errStr, "broken pipe")
+}
+
+// lookupByPath extracts subdomain from path and looks up the tunnel.
+// Supports format: /subdomain/... which gets rewritten to /...
+func (p *HTTPProxy) lookupByPath(r *http.Request) (*TunnelEntry, bool) {
+	path := r.URL.Path
+	if path == "" || path == "/" {
+		return nil, false
+	}
+
+	// Remove leading slash and split
+	path = strings.TrimPrefix(path, "/")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) == 0 {
+		return nil, false
+	}
+
+	subdomain := strings.ToLower(parts[0])
+	entry, found := p.registry.Lookup(subdomain)
+	if !found {
+		return nil, false
+	}
+
+	// Rewrite the path to remove the subdomain prefix
+	if len(parts) > 1 {
+		r.URL.Path = "/" + parts[1]
+	} else {
+		r.URL.Path = "/"
+	}
+
+	return entry, true
 }
