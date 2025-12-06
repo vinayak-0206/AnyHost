@@ -1,0 +1,82 @@
+# GoTunnel Server Configuration
+
+# Address for client connections (control plane)
+control_addr: ":9000"
+
+# Address for HTTP traffic (public proxy)
+http_addr: ":8080"
+
+# Address for HTTPS traffic (optional)
+https_addr: ":8443"
+
+# Base domain for subdomain routing
+# Clients will get URLs like: subdomain.example.com
+domain: "localhost"
+
+# TLS Configuration
+tls:
+  enabled: false
+  cert_file: ""
+  key_file: ""
+  # Enable automatic certificate management via Let's Encrypt
+  auto_cert: false
+  auto_cert_dir: "./certs"
+
+# Authentication configuration
+auth:
+  # Mode: "token", "jwt", or "none"
+  mode: "token"
+  # Path to file containing valid tokens (one per line, format: token:userID)
+  token_file: ""
+  # JWT secret for validating JWT tokens
+  jwt_secret: ""
+
+# Resource limits
+limits:
+  # Maximum concurrent connections per user
+  max_connections_per_user: 5
+  # Maximum tunnels per connection
+  max_tunnels_per_connection: 10
+  # Rate limit for requests per subdomain per minute
+  max_requests_per_minute: 1000
+  # Maximum request body size in bytes (50MB)
+  max_request_body_size: 52428800
+  # Bandwidth limit per tunnel in bytes/sec (0 = unlimited)
+  max_bandwidth_bytes_per_sec: 0
+
+# Timeout configuration
+timeouts:
+  # Timeout for completing handshake
+  handshake_timeout: 10s
+  # Timeout for idle connections
+  idle_timeout: 5m
+  # Timeout for proxied requests
+  request_timeout: 30s
+  # Timeout for dialing local services
+  dial_timeout: 5s
+  # Write timeout
+  write_timeout: 10s
+  # Read timeout
+  read_timeout: 10s
+
+# Reserved subdomains that cannot be claimed by users
+reserved_subdomains:
+  - www
+  - api
+  - admin
+  - mail
+  - smtp
+  - pop
+  - imap
+  - ftp
+  - ssh
+  - dns
+  - ns
+  - mx
+  - app
+  - static
+  - cdn
+  - assets
+
+# Logging level: debug, info, warn, error
+log_level: "info"

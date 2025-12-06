@@ -1,0 +1,49 @@
+# GoTunnel Client Configuration
+
+# Server address
+server_addr: "localhost:9000"
+
+# Authentication token
+token: "your-secret-token"
+
+# Optional client identifier (for logging/debugging)
+client_id: "my-client"
+
+# Tunnel configurations
+# You can define multiple tunnels that will be multiplexed over a single connection
+tunnels:
+  - subdomain: "api"
+    local_port: 3000
+    local_host: "127.0.0.1"
+    protocol: "http"
+
+  - subdomain: "dashboard"
+    local_port: 8080
+    local_host: "127.0.0.1"
+    protocol: "http"
+
+  - subdomain: "web"
+    local_port: 5000
+    local_host: "127.0.0.1"
+    protocol: "http"
+
+# Reconnection settings
+reconnect:
+  # Enable automatic reconnection
+  enabled: true
+  # Initial delay before first reconnection attempt
+  initial_delay: 1s
+  # Maximum delay between reconnection attempts
+  max_delay: 30s
+  # Multiplier for exponential backoff
+  multiplier: 2.0
+  # Maximum reconnection attempts (0 = unlimited)
+  max_attempts: 0
+
+# Local inspection server (traffic dashboard)
+local_server:
+  enabled: false
+  addr: ":4040"
+
+# Logging level: debug, info, warn, error
+log_level: "info"

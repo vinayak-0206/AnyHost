@@ -1,0 +1,13 @@
+server_addr: "localhost:9001"
+token: "dev-token"
+tunnels:
+  - subdomain: "myapi"
+    local_port: 3001
+  - subdomain: "myweb"
+    local_port: 3002
+  - subdomain: "dashboard"
+    local_port: 3003
+  - subdomain: "docs"
+    local_port: 3004
+  - subdomain: "backend"
+    local_port: 3005
