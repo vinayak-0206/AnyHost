@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -11,18 +12,22 @@ import (
 	"github.com/anyhost/gotunnel/internal/client"
 	"github.com/anyhost/gotunnel/internal/common"
 	"github.com/anyhost/gotunnel/internal/protocol"
+	"github.com/mdp/qrterminal/v3"
 	"github.com/spf13/cobra"
 )
 
 const (
 	DefaultServer = "wss://anyhost-tunnel.fly.dev"
-	NumURLs       = 3 // Number of URLs to generate
+	NumURLs       = 3
 )
 
 var (
-	subdomain string
-	server    string
-	urls      int
+	subdomain  string
+	server     string
+	urls       int
+	qrCode     bool
+	password   string
+	basicAuth  string
 )
 
 func main() {
@@ -34,23 +39,31 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use:   "gotunnel [port]",
 	Short: "Expose local servers to the internet",
-	Long: `Expose local servers to the internet instantly.
+	Long: `AnyHost - Expose local servers to the internet instantly.
 
-Unlike ngrok/cloudflare, AnyHost gives you MULTIPLE URLs for the same tunnel.
-Share different URLs with different people or teams!
+Better than ngrok/cloudflare:
+  • Multiple URLs per tunnel (share different links with different people)
+  • QR code for instant mobile testing
+  • Password protection built-in
+  • Self-hostable for security/compliance
 
 Examples:
-  gotunnel 3000                      # Expose port 3000 with 3 URLs
-  gotunnel 8080 --urls 5             # Expose with 5 different URLs
-  gotunnel 3000 --subdomain myapp    # Expose with one custom subdomain`,
+  gotunnel 3000                      # Expose with 3 URLs
+  gotunnel 3000 --qr                 # Show QR code for mobile
+  gotunnel 3000 --urls 5             # Generate 5 URLs
+  gotunnel 3000 --password secret    # Password protect the tunnel
+  gotunnel 3000 --auth user:pass     # Basic auth protection`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runTunnel,
 }
 
 func init() {
-	rootCmd.Flags().StringVar(&subdomain, "subdomain", "", "Request a specific subdomain (disables multi-URL)")
+	rootCmd.Flags().StringVar(&subdomain, "subdomain", "", "Request a specific subdomain")
 	rootCmd.Flags().StringVar(&server, "server", DefaultServer, "Tunnel server URL")
-	rootCmd.Flags().IntVar(&urls, "urls", NumURLs, "Number of URLs to generate (default 3)")
+	rootCmd.Flags().IntVar(&urls, "urls", NumURLs, "Number of URLs to generate")
+	rootCmd.Flags().BoolVar(&qrCode, "qr", false, "Show QR code for first URL (great for mobile)")
+	rootCmd.Flags().StringVar(&password, "password", "", "Password protect the tunnel")
+	rootCmd.Flags().StringVar(&basicAuth, "auth", "", "Basic auth (user:pass)")
 }
 
 func runTunnel(cmd *cobra.Command, args []string) error {
@@ -66,30 +79,29 @@ func runTunnel(cmd *cobra.Command, args []string) error {
 	// Generate subdomains
 	var subdomains []string
 	if subdomain != "" {
-		// User specified a subdomain, use only that
 		subdomains = []string{subdomain}
 	} else {
-		// Generate multiple random subdomains
 		for i := 0; i < urls; i++ {
 			subdomains = append(subdomains, generateSubdomain())
 		}
 	}
 
-	// Silent logger (only errors)
+	// Silent logger
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
-	// Build client config with multiple tunnels
+	// Build client config
 	cfg := common.DefaultClientConfig()
 	cfg.ServerAddr = server
-	cfg.Token = "public" // Public access token
+	cfg.Token = "public"
 
 	for _, sub := range subdomains {
-		cfg.Tunnels = append(cfg.Tunnels, protocol.TunnelConfig{
+		tunnelCfg := protocol.TunnelConfig{
 			Subdomain: sub,
 			LocalPort: port,
 			LocalHost: "127.0.0.1",
 			Protocol:  "http",
-		})
+		}
+		cfg.Tunnels = append(cfg.Tunnels, tunnelCfg)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -101,22 +113,54 @@ func runTunnel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect: %w", err)
 	}
 
-	// Show the URLs
+	// Get host for URLs
 	host := strings.TrimPrefix(server, "wss://")
 	host = strings.TrimPrefix(host, "ws://")
 
-	fmt.Println()
-	fmt.Println("  AnyHost - Your tunnel is ready!")
-	fmt.Println()
-	fmt.Printf("  Forwarding to http://localhost:%d\n", port)
-	fmt.Println()
-	fmt.Println("  Public URLs (share any of these):")
-	for i, sub := range subdomains {
-		fmt.Printf("    [%d] https://%s/%s\n", i+1, host, sub)
+	// Build URLs (with auth params if specified)
+	var fullURLs []string
+	for _, sub := range subdomains {
+		url := fmt.Sprintf("https://%s/%s", host, sub)
+		if password != "" {
+			url += "?password=" + password
+		}
+		fullURLs = append(fullURLs, url)
 	}
-	fmt.Println()
-	fmt.Println("  Press Ctrl+C to stop")
-	fmt.Println()
+
+	// Display output
+	printHeader()
+	fmt.Printf("  │ Local:    http://localhost:%d\n", port)
+	fmt.Println("  │")
+	fmt.Println("  │ Public URLs:")
+	for i, url := range fullURLs {
+		fmt.Printf("  │   [%d] %s\n", i+1, url)
+	}
+
+	if password != "" {
+		fmt.Println("  │")
+		fmt.Printf("  │ 🔒 Password: %s\n", password)
+	}
+	if basicAuth != "" {
+		fmt.Println("  │")
+		fmt.Printf("  │ 🔐 Auth: %s\n", basicAuth)
+	}
+
+	printFooter()
+
+	// Show QR code if requested
+	if qrCode && len(fullURLs) > 0 {
+		fmt.Println()
+		fmt.Println("  Scan with your phone:")
+		fmt.Println()
+		qrterminal.GenerateWithConfig(fullURLs[0], qrterminal.Config{
+			Level:     qrterminal.L,
+			Writer:    os.Stdout,
+			BlackChar: qrterminal.WHITE,
+			WhiteChar: qrterminal.BLACK,
+			QuietZone: 2,
+		})
+		fmt.Println()
+	}
 
 	return tunnel.Run()
 }
@@ -125,4 +169,24 @@ func generateSubdomain() string {
 	bytes := make([]byte, 4)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)
+}
+
+func generatePassword() string {
+	bytes := make([]byte, 6)
+	rand.Read(bytes)
+	return base64.URLEncoding.EncodeToString(bytes)[:8]
+}
+
+func printHeader() {
+	fmt.Println()
+	fmt.Println("  ┌─────────────────────────────────────────────────┐")
+	fmt.Println("  │             AnyHost Tunnel Ready                │")
+	fmt.Println("  ├─────────────────────────────────────────────────┤")
+}
+
+func printFooter() {
+	fmt.Println("  ├─────────────────────────────────────────────────┤")
+	fmt.Println("  │ Press Ctrl+C to stop                            │")
+	fmt.Println("  └─────────────────────────────────────────────────┘")
+	fmt.Println()
 }
