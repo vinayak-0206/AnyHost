@@ -183,7 +183,7 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Open stream to client
-	stream, err := p.controlPlane.ProxyRequest(entry, requestID)
+	stream, err := p.controlPlane.ProxyRequest(entry, requestID, r.Method, r.URL.Path)
 	if err != nil {
 		logger.Error("failed to open stream", slog.Any("error", err))
 		http.Error(w, "Failed to connect to tunnel", http.StatusBadGateway)

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/anyhost/gotunnel/internal/client"
 	"github.com/anyhost/gotunnel/internal/common"
@@ -28,6 +29,7 @@ var (
 	qrCode     bool
 	password   string
 	basicAuth  string
+	inspect    bool
 )
 
 func main() {
@@ -44,15 +46,16 @@ var rootCmd = &cobra.Command{
 Better than ngrok/cloudflare:
   • Multiple URLs per tunnel (share different links with different people)
   • QR code for instant mobile testing
+  • Live request inspector (see all HTTP traffic)
   • Password protection built-in
   • Self-hostable for security/compliance
 
 Examples:
   gotunnel 3000                      # Expose with 3 URLs
+  gotunnel 3000 --inspect            # Show live HTTP requests
   gotunnel 3000 --qr                 # Show QR code for mobile
   gotunnel 3000 --urls 5             # Generate 5 URLs
-  gotunnel 3000 --password secret    # Password protect the tunnel
-  gotunnel 3000 --auth user:pass     # Basic auth protection`,
+  gotunnel 3000 --password secret    # Password protect the tunnel`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runTunnel,
 }
@@ -64,6 +67,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&qrCode, "qr", false, "Show QR code for first URL (great for mobile)")
 	rootCmd.Flags().StringVar(&password, "password", "", "Password protect the tunnel")
 	rootCmd.Flags().StringVar(&basicAuth, "auth", "", "Basic auth (user:pass)")
+	rootCmd.Flags().BoolVar(&inspect, "inspect", false, "Show live HTTP request log")
 }
 
 func runTunnel(cmd *cobra.Command, args []string) error {
@@ -160,6 +164,32 @@ func runTunnel(cmd *cobra.Command, args []string) error {
 			QuietZone: 2,
 		})
 		fmt.Println()
+	}
+
+	// Register request handler for --inspect mode
+	if inspect {
+		var requestCount atomic.Int64
+		fmt.Println("  Request Log:")
+		fmt.Println("  " + strings.Repeat("─", 70))
+
+		tunnel.OnRequest(func(info client.RequestInfo) {
+			count := requestCount.Add(1)
+			method := info.Method
+			if method == "" {
+				method = "???"
+			}
+			path := info.Path
+			if path == "" {
+				path = "/"
+			}
+			// Truncate path if too long
+			if len(path) > 40 {
+				path = path[:37] + "..."
+			}
+
+			timestamp := info.Timestamp.Format("15:04:05")
+			fmt.Printf("  %s  [%d] %-7s %s\n", timestamp, count, method, path)
+		})
 	}
 
 	return tunnel.Run()

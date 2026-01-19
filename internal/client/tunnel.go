@@ -57,6 +57,23 @@ func (s TunnelState) String() string {
 	}
 }
 
+// RequestInfo contains information about an incoming request.
+type RequestInfo struct {
+	ID        string
+	Subdomain string
+	LocalPort int
+	Method    string
+	Path      string
+	Timestamp time.Time
+	Duration  time.Duration
+	Status    int
+	BytesIn   int64
+	BytesOut  int64
+}
+
+// RequestHandler is called for each request.
+type RequestHandler func(info RequestInfo)
+
 // Tunnel is the main client that connects to the tunnel server.
 type Tunnel struct {
 	config *common.ClientConfig
@@ -71,9 +88,10 @@ type Tunnel struct {
 
 	state atomic.Int32
 
-	mu            sync.RWMutex
-	tunnelStatus  []protocol.TunnelStatus
-	stateHandlers []func(TunnelState)
+	mu              sync.RWMutex
+	tunnelStatus    []protocol.TunnelStatus
+	stateHandlers   []func(TunnelState)
+	requestHandlers []RequestHandler
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -89,11 +107,12 @@ func NewTunnel(cfg *common.ClientConfig, logger *slog.Logger) (*Tunnel, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	t := &Tunnel{
-		config:        cfg,
-		logger:        logger.With(slog.String("component", "tunnel")),
-		ctx:           ctx,
-		cancel:        cancel,
-		stateHandlers: make([]func(TunnelState), 0),
+		config:          cfg,
+		logger:          logger.With(slog.String("component", "tunnel")),
+		ctx:             ctx,
+		cancel:          cancel,
+		stateHandlers:   make([]func(TunnelState), 0),
+		requestHandlers: make([]RequestHandler, 0),
 	}
 
 	// Create router with connection pooling
@@ -346,6 +365,8 @@ func (t *Tunnel) acceptLoop() {
 func (t *Tunnel) handleStream(stream net.Conn) {
 	defer stream.Close()
 
+	startTime := time.Now()
+
 	// Read stream header
 	header, err := protocol.ReadStreamHeader(stream)
 	if err != nil {
@@ -361,12 +382,30 @@ func (t *Tunnel) handleStream(stream net.Conn) {
 
 	logger.Debug("handling request")
 
+	// Create request info
+	info := RequestInfo{
+		ID:        header.RequestID,
+		Subdomain: header.Subdomain,
+		LocalPort: header.LocalPort,
+		Method:    header.Method,
+		Path:      header.Path,
+		Timestamp: startTime,
+	}
+
+	// Notify handlers that request started
+	t.notifyRequest(info)
+
 	// Forward to local service
 	if err := t.router.Forward(stream, header); err != nil {
 		logger.Error("failed to forward request", slog.Any("error", err))
+		info.Duration = time.Since(startTime)
+		info.Status = 502 // Bad Gateway
+		t.notifyRequest(info)
 		return
 	}
 
+	info.Duration = time.Since(startTime)
+	info.Status = 200
 	logger.Debug("request completed")
 }
 
@@ -453,6 +492,25 @@ func (t *Tunnel) OnStateChange(handler func(TunnelState)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.stateHandlers = append(t.stateHandlers, handler)
+}
+
+// OnRequest registers a handler for incoming requests.
+func (t *Tunnel) OnRequest(handler RequestHandler) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.requestHandlers = append(t.requestHandlers, handler)
+}
+
+// notifyRequest notifies all request handlers.
+func (t *Tunnel) notifyRequest(info RequestInfo) {
+	t.mu.RLock()
+	handlers := make([]RequestHandler, len(t.requestHandlers))
+	copy(handlers, t.requestHandlers)
+	t.mu.RUnlock()
+
+	for _, handler := range handlers {
+		go handler(info)
+	}
 }
 
 // GetTunnelStatus returns the status of all tunnels.

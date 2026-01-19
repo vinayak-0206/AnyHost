@@ -423,7 +423,7 @@ func (cp *ControlPlane) BroadcastShutdown(reason string, gracePeriodMs int) {
 }
 
 // ProxyRequest proxies an incoming HTTP request to the appropriate client.
-func (cp *ControlPlane) ProxyRequest(entry *TunnelEntry, requestID string) (io.ReadWriteCloser, error) {
+func (cp *ControlPlane) ProxyRequest(entry *TunnelEntry, requestID, method, path string) (io.ReadWriteCloser, error) {
 	if !entry.Session.IsActive() {
 		return nil, fmt.Errorf("session is not active")
 	}
@@ -434,6 +434,8 @@ func (cp *ControlPlane) ProxyRequest(entry *TunnelEntry, requestID string) (io.R
 		LocalHost: entry.LocalHost,
 		RequestID: requestID,
 		Subdomain: entry.Subdomain,
+		Method:    method,
+		Path:      path,
 	}
 
 	stream, err := entry.Session.OpenStreamWithHeader(header)

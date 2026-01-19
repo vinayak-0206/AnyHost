@@ -44,6 +44,12 @@ type StreamHeader struct {
 
 	// Host is the original Host header (for HTTP streams).
 	Host string `json:"host,omitempty"`
+
+	// Method is the HTTP method (GET, POST, etc.) for request inspection.
+	Method string `json:"method,omitempty"`
+
+	// Path is the HTTP request path for request inspection.
+	Path string `json:"path,omitempty"`
 }
 
 // MaxStreamHeaderSize is the maximum allowed size for a stream header.
