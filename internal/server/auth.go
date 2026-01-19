@@ -143,6 +143,50 @@ func (a *TokenAuthenticator) TokenCount() int {
 	return len(a.tokens)
 }
 
+// DatabaseAuthenticator validates tokens against the database (user IDs).
+type DatabaseAuthenticator struct {
+	db       interface{ UserExists(userID string) bool }
+	fallback Authenticator
+}
+
+// NewDatabaseAuthenticator creates a new database authenticator with optional fallback.
+func NewDatabaseAuthenticator(db interface{ UserExists(userID string) bool }, fallback Authenticator) *DatabaseAuthenticator {
+	return &DatabaseAuthenticator{
+		db:       db,
+		fallback: fallback,
+	}
+}
+
+// Validate checks if a token (user ID) exists in the database.
+func (a *DatabaseAuthenticator) Validate(token string) (bool, error) {
+	// First check if it's a valid user ID in the database
+	if a.db != nil {
+		exists := a.db.UserExists(token)
+		if exists {
+			return true, nil
+		}
+	}
+
+	// Fall back to other authenticator (e.g., dev-token)
+	if a.fallback != nil {
+		return a.fallback.Validate(token)
+	}
+
+	return false, nil
+}
+
+// GetUserID returns the token as the user ID (since token IS the user ID).
+func (a *DatabaseAuthenticator) GetUserID(token string) (string, error) {
+	valid, err := a.Validate(token)
+	if err != nil {
+		return "", err
+	}
+	if !valid {
+		return "", protocol.ErrUnauthorized
+	}
+	return token, nil
+}
+
 // NewAuthenticatorFromConfig creates an authenticator based on the auth configuration.
 func NewAuthenticatorFromConfig(cfg *common.AuthConfig) (Authenticator, error) {
 	switch cfg.Mode {

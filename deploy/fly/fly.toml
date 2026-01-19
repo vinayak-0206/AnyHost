@@ -1,0 +1,45 @@
+# Fly.io Configuration for AnyHost
+# Free tier: 3 shared VMs, 160GB outbound, shared IPv4
+#
+# Deploy: fly launch --copy-config --no-deploy
+#         fly deploy
+
+app = "anyhost"
+primary_region = "sjc"  # Change to your preferred region
+
+[build]
+  dockerfile = "../../Dockerfile"
+
+[env]
+  PORT = "8080"
+  LOG_LEVEL = "info"
+  DATABASE_PATH = "/data/gotunnel.db"
+  # DOMAIN is set via fly secrets
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false  # Keep running for tunnel connections
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 800
+
+# Health check
+[[services.http_checks]]
+  interval = 30000
+  timeout = 5000
+  path = "/health"
+
+# Persistent volume for SQLite database
+[mounts]
+  source = "anyhost_data"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256  # Minimal, adjust as needed

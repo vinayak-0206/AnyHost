@@ -23,11 +23,17 @@ type ServerConfig struct {
 	// Domain is the base domain for subdomain routing (e.g., "example.com").
 	Domain string `yaml:"domain"`
 
+	// DatabasePath is the path to the SQLite database file.
+	DatabasePath string `yaml:"database_path"`
+
 	// TLS configuration for HTTPS.
 	TLS TLSConfig `yaml:"tls"`
 
 	// Auth configuration for client authentication.
 	Auth AuthConfig `yaml:"auth"`
+
+	// CORS configuration for API endpoints.
+	CORS CORSConfig `yaml:"cors"`
 
 	// Limits configuration for rate limiting and resource constraints.
 	Limits LimitsConfig `yaml:"limits"`
@@ -72,6 +78,17 @@ type AuthConfig struct {
 	JWTSecret string `yaml:"jwt_secret"`
 }
 
+// CORSConfig holds CORS (Cross-Origin Resource Sharing) configuration.
+type CORSConfig struct {
+	// AllowedOrigins is a list of allowed origins for CORS requests.
+	// Use ["*"] to allow all origins (not recommended for production).
+	// If empty, defaults to the server's domain.
+	AllowedOrigins []string `yaml:"allowed_origins"`
+
+	// AllowCredentials indicates whether credentials (cookies, auth headers) are allowed.
+	AllowCredentials bool `yaml:"allow_credentials"`
+}
+
 // LimitsConfig holds rate limiting and resource constraint configuration.
 type LimitsConfig struct {
 	// MaxConnectionsPerUser is the maximum concurrent connections per user.
@@ -114,16 +131,21 @@ type TimeoutsConfig struct {
 // DefaultServerConfig returns a ServerConfig with sensible defaults.
 func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
-		ControlAddr: ":9000",
-		HTTPAddr:    ":8080",
-		HTTPSAddr:   ":8443",
-		Domain:      "localhost",
+		ControlAddr:  ":9000",
+		HTTPAddr:     ":8080",
+		HTTPSAddr:    ":8443",
+		Domain:       "localhost",
+		DatabasePath: "./gotunnel.db",
 		TLS: TLSConfig{
 			Enabled:     false,
 			AutoCertDir: "./certs",
 		},
 		Auth: AuthConfig{
 			Mode: "token",
+		},
+		CORS: CORSConfig{
+			AllowedOrigins:   []string{}, // Will default to domain
+			AllowCredentials: true,
 		},
 		Limits: LimitsConfig{
 			MaxConnectionsPerUser:   5,
@@ -147,6 +169,34 @@ func DefaultServerConfig() *ServerConfig {
 		},
 		LogLevel: "info",
 	}
+}
+
+// GetAllowedOrigins returns the list of allowed origins for CORS.
+// If no origins are configured, it defaults to the server's domain with common protocols.
+func (c *ServerConfig) GetAllowedOrigins() []string {
+	if len(c.CORS.AllowedOrigins) > 0 {
+		return c.CORS.AllowedOrigins
+	}
+	// Default to the configured domain with http and https
+	return []string{
+		"http://" + c.Domain,
+		"https://" + c.Domain,
+		"http://localhost:8080",
+		"http://localhost:3000",
+		"http://127.0.0.1:8080",
+		"http://127.0.0.1:3000",
+	}
+}
+
+// IsOriginAllowed checks if the given origin is allowed by CORS configuration.
+func (c *ServerConfig) IsOriginAllowed(origin string) bool {
+	allowedOrigins := c.GetAllowedOrigins()
+	for _, allowed := range allowedOrigins {
+		if allowed == "*" || allowed == origin {
+			return true
+		}
+	}
+	return false
 }
 
 // LoadServerConfig loads server configuration from a YAML file.

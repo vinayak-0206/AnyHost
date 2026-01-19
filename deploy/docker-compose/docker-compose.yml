@@ -1,0 +1,67 @@
+# AnyHost Docker Compose Deployment
+# Cost: $4-6/month on any VPS (DigitalOcean, Hetzner, Linode, Vultr)
+#
+# Quick deploy:
+#   1. Get a VPS with Docker installed
+#   2. Point your domain (*.tunnel.yourdomain.com) to the VPS IP
+#   3. Copy this file and run: docker compose up -d
+
+version: '3.8'
+
+services:
+  anyhost:
+    image: anyhost/gotunnel:latest
+    # Or build from source:
+    # build: ../..
+    container_name: anyhost
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+      - "443:8443"
+    environment:
+      - DOMAIN=${DOMAIN:-tunnel.example.com}
+      - PORT=8080
+      - DATABASE_PATH=/data/gotunnel.db
+      - LOG_LEVEL=info
+    volumes:
+      - anyhost-data:/data
+      - ./tokens.txt:/app/tokens.txt:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      # Traefik labels (if using Traefik as reverse proxy)
+      - "traefik.enable=true"
+      - "traefik.http.routers.anyhost.rule=HostRegexp(`{subdomain:.+}.${DOMAIN}`)"
+      - "traefik.http.routers.anyhost.entrypoints=websecure"
+      - "traefik.http.routers.anyhost.tls.certresolver=letsencrypt"
+
+  # Optional: Caddy for automatic HTTPS (recommended for simple setups)
+  caddy:
+    image: caddy:2-alpine
+    container_name: anyhost-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - anyhost
+    profiles:
+      - with-caddy
+
+volumes:
+  anyhost-data:
+  caddy-data:
+  caddy-config:
+
+# Network for service discovery
+networks:
+  default:
+    name: anyhost-network

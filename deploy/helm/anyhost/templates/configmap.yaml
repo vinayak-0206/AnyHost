@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "anyhost.fullname" . }}-config
+  labels:
+    {{- include "anyhost.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    # AnyHost Server Configuration
+    domain: {{ .Values.config.domain | quote }}
+    http_addr: ":8080"
+    database_path: "/data/gotunnel.db"
+    log_level: {{ .Values.config.logLevel | quote }}
+
+    auth:
+      mode: {{ .Values.config.authMode | quote }}
+      {{- if or .Values.secrets.authTokens .Values.secrets.existingSecret }}
+      token_file: "/etc/anyhost/secrets/{{ .Values.secrets.existingSecretKey }}"
+      {{- end }}
+
+    {{- if .Values.config.corsAllowedOrigins }}
+    cors:
+      allowed_origins:
+        {{- range .Values.config.corsAllowedOrigins }}
+        - {{ . | quote }}
+        {{- end }}
+    {{- end }}
+
+    limits:
+      max_connections_per_user: {{ .Values.config.limits.maxConnectionsPerUser }}
+      max_tunnels_per_connection: {{ .Values.config.limits.maxTunnelsPerConnection }}
+      max_requests_per_minute: {{ .Values.config.limits.maxRequestsPerMinute }}
+      max_request_body_size: {{ .Values.config.limits.maxRequestBodySize }}
+
+    reserved_subdomains:
+      {{- range .Values.config.reservedSubdomains }}
+      - {{ . | quote }}
+      {{- end }}
+
+    timeouts:
+      handshake_timeout: 10s
+      idle_timeout: 5m
+      request_timeout: 30s
+      dial_timeout: 5s
+      write_timeout: 10s
+      read_timeout: 10s

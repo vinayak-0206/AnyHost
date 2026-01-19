@@ -1,0 +1,12 @@
+# Caddyfile for AnyHost with automatic HTTPS
+# Replace tunnel.example.com with your domain
+
+# Main domain - dashboard and API
+tunnel.example.com {
+    reverse_proxy anyhost:8080
+}
+
+# Wildcard for all subdomains
+*.tunnel.example.com {
+    reverse_proxy anyhost:8080
+}

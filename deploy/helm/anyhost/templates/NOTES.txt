@@ -1,0 +1,45 @@
+
+AnyHost has been deployed successfully!
+
+{{- if .Values.ingress.enabled }}
+
+Your AnyHost server is available at:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+
+{{- if .Values.ingress.wildcard.enabled }}
+
+Tunnel subdomains will be accessible at:
+  http{{ if $.Values.ingress.wildcard.tls }}s{{ end }}://*.{{ trimPrefix "*." .Values.ingress.wildcard.host }}
+{{- end }}
+
+{{- else if contains "NodePort" .Values.service.type }}
+
+Get the application URL by running:
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "anyhost.fullname" . }})
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  echo http://$NODE_IP:$NODE_PORT
+
+{{- else if contains "LoadBalancer" .Values.service.type }}
+
+Get the application URL by running:
+  NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+  kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "anyhost.fullname" . }}
+
+{{- else if contains "ClusterIP" .Values.service.type }}
+
+Access AnyHost by port-forwarding:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "anyhost.fullname" . }} 8080:{{ .Values.service.port }}
+
+Then visit: http://localhost:8080
+
+{{- end }}
+
+To connect a tunnel client:
+  gotunnel --server ws://{{ .Values.config.domain }}:{{ .Values.service.port }}/tunnel \
+           --token YOUR_TOKEN \
+           --subdomain myapp \
+           --port 3000
+
+For more information, visit: https://github.com/anyhost/gotunnel

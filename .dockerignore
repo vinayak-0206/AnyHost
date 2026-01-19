@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# Build outputs (rebuilt in Docker)
+bin/
+dist/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local data
+*.db
+*.log
+tokens.txt
+
+# Terraform/Deploy
+deploy/
+*.tfstate*
+.terraform/
+
+# Test files
+*_test.go
+
+# Documentation
+*.md

@@ -23,6 +23,11 @@ type TunnelEntry struct {
 	Session   *Session
 }
 
+// SubdomainOwnerChecker checks subdomain ownership in the database.
+type SubdomainOwnerChecker interface {
+	GetSubdomainOwner(subdomain string) (string, error)
+}
+
 // Registry manages the mapping of subdomains to active client sessions.
 // It is safe for concurrent access.
 type Registry struct {
@@ -39,6 +44,9 @@ type Registry struct {
 
 	// domain is the base domain (e.g., "example.com").
 	domain string
+
+	// ownerChecker is used to verify subdomain ownership from database.
+	ownerChecker SubdomainOwnerChecker
 }
 
 // NewRegistry creates a new registry with the given base domain and reserved subdomains.
@@ -54,6 +62,13 @@ func NewRegistry(domain string, reservedSubdomains []string) *Registry {
 		reservedSubdomains: reserved,
 		domain:             domain,
 	}
+}
+
+// SetOwnerChecker sets the subdomain owner checker for database validation.
+func (r *Registry) SetOwnerChecker(checker SubdomainOwnerChecker) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ownerChecker = checker
 }
 
 // ValidateSubdomain checks if a subdomain is valid for registration.
@@ -92,6 +107,21 @@ func (r *Registry) Register(session *Session, tunnels []protocol.TunnelConfig) [
 			status.Error = err.Error()
 			results = append(results, status)
 			continue
+		}
+
+		// Check database ownership if owner checker is set
+		if r.ownerChecker != nil {
+			owner, err := r.ownerChecker.GetSubdomainOwner(subdomain)
+			if err == nil && owner != "" {
+				// Subdomain is reserved in database - check ownership
+				if owner != session.Token {
+					status.Status = "error"
+					status.Error = "subdomain is reserved by another user"
+					results = append(results, status)
+					continue
+				}
+			}
+			// If no owner or error, allow first-come-first-served
 		}
 
 		// Check if subdomain is already taken by another session

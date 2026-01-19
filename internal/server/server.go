@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/anyhost/gotunnel/internal/common"
+	"github.com/anyhost/gotunnel/internal/database"
 )
 
 // Server is the main tunnel server that coordinates all components.
@@ -20,6 +23,8 @@ type Server struct {
 	controlPlane *ControlPlane
 	httpProxy    *HTTPProxy
 	logger       *slog.Logger
+	db  *database.DB
+    api *API
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -27,6 +32,15 @@ type Server struct {
 
 // NewServer creates a new tunnel server.
 func NewServer(cfg *common.ServerConfig, logger *slog.Logger) (*Server, error) {
+	// Use configured database path, with fallback to default
+	dbPath := cfg.DatabasePath
+	if dbPath == "" {
+		dbPath = "./gotunnel.db"
+	}
+	db, err := database.New(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -36,18 +50,26 @@ func NewServer(cfg *common.ServerConfig, logger *slog.Logger) (*Server, error) {
 	// Create registry
 	registry := NewRegistry(cfg.Domain, cfg.ReservedSubdomains)
 
-	// Create authenticator
-	auth, err := NewAuthenticatorFromConfig(&cfg.Auth)
+	// Set database as owner checker for subdomain ownership validation
+	registry.SetOwnerChecker(db)
+
+	// Create base authenticator from config
+	baseAuth, err := NewAuthenticatorFromConfig(&cfg.Auth)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create authenticator: %w", err)
 	}
+
+	// Wrap with database authenticator to also accept user IDs from dashboard
+	auth := NewDatabaseAuthenticator(db, baseAuth)
 
 	// Create control plane
 	controlPlane := NewControlPlane(cfg, registry, auth, logger)
 
 	// Create HTTP proxy
 	httpProxy := NewHTTPProxy(cfg, registry, controlPlane, logger)
+
+	api := NewAPI(db, registry, controlPlane)
 
 	return &Server{
 		config:       cfg,
@@ -58,7 +80,39 @@ func NewServer(cfg *common.ServerConfig, logger *slog.Logger) (*Server, error) {
 		logger:       logger.With(slog.String("component", "server")),
 		ctx:          ctx,
 		cancel:       cancel,
+		db:           db,
+		api:          api,
 	}, nil
+}
+
+func (s *Server) setupRoutes() http.Handler {
+    mux := http.NewServeMux()
+
+    // API Routes
+    mux.HandleFunc("POST /api/auth/register", s.api.HandleRegister)
+    mux.HandleFunc("POST /api/auth/login", s.api.HandleLogin)
+    mux.HandleFunc("POST /api/tunnels", AuthMiddleware(s.api.HandleReserve))
+    mux.HandleFunc("GET /api/tunnels", AuthMiddleware(s.api.HandleListTunnels))
+
+    // Static Dashboard Files (React Build)
+    fileServer := http.FileServer(http.Dir("./web/dist"))
+    mux.Handle("/dashboard/", http.StripPrefix("/dashboard/", fileServer))
+
+    // Fallback to existing HTTP Proxy
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/dashboard/") {
+            mux.ServeHTTP(w, r)
+            return
+        }
+        // If Host matches "dashboard.domain.com", serve dashboard
+        if strings.HasPrefix(r.Host, "dashboard.") {
+             mux.ServeHTTP(w, r)
+             return
+        }
+        
+        // Else, existing Proxy logic
+        s.httpProxy.ServeHTTP(w, r)
+    })
 }
 
 // Start starts all server components.

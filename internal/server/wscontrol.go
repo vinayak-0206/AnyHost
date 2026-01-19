@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/anyhost/gotunnel/internal/common"
@@ -12,12 +13,22 @@ import (
 	"github.com/hashicorp/yamux"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  16 * 1024,
-	WriteBufferSize: 16 * 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for tunnel connections
-	},
+// createUpgrader creates a WebSocket upgrader with origin checking based on config.
+// For tunnel connections, we're more permissive since the tunnel protocol has its own auth.
+func createUpgrader(config *common.ServerConfig) websocket.Upgrader {
+	return websocket.Upgrader{
+		ReadBufferSize:  16 * 1024,
+		WriteBufferSize: 16 * 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			// If no origin header (e.g., CLI clients), allow
+			if origin == "" {
+				return true
+			}
+			// Check against allowed origins
+			return config.IsOriginAllowed(origin)
+		},
+	}
 }
 
 // HandleWebSocket handles WebSocket connections for the control plane.
@@ -25,6 +36,9 @@ var upgrader = websocket.Upgrader{
 func (cp *ControlPlane) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 	logger := cp.logger.With(slog.String("remote_addr", r.RemoteAddr))
 	logger.Debug("WebSocket connection request")
+
+	// Create upgrader with proper origin checking
+	upgrader := createUpgrader(cp.config)
 
 	// Upgrade to WebSocket
 	ws, err := upgrader.Upgrade(w, r, nil)
@@ -252,9 +266,87 @@ func (s *Server) UnifiedHandler() http.Handler {
 			return
 		}
 
+		// API endpoints
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			s.handleAPI(w, r)
+			return
+		}
+
+		// Dashboard static files
+		if strings.HasPrefix(r.URL.Path, "/dashboard") {
+			s.serveDashboard(w, r)
+			return
+		}
+
+		// Serve assets for dashboard (Vite builds with absolute paths)
+		if strings.HasPrefix(r.URL.Path, "/assets/") || r.URL.Path == "/vite.svg" {
+			http.FileServer(http.Dir("./web/dist")).ServeHTTP(w, r)
+			return
+		}
+
 		// Otherwise, handle as HTTP proxy request
 		s.httpProxy.ServeHTTP(w, r)
 	})
+}
+
+// handleAPI routes API requests
+func (s *Server) handleAPI(w http.ResponseWriter, r *http.Request) {
+	// CORS headers - use configured allowed origins
+	origin := r.Header.Get("Origin")
+	if origin != "" && s.config.IsOriginAllowed(origin) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Set("Vary", "Origin")
+	}
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	if s.config.CORS.AllowCredentials {
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+	}
+
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	switch {
+	// Auth endpoints (no auth required)
+	case r.URL.Path == "/api/auth/register" && r.Method == "POST":
+		s.api.HandleRegister(w, r)
+	case r.URL.Path == "/api/auth/login" && r.Method == "POST":
+		s.api.HandleLogin(w, r)
+
+	// Tunnel endpoints
+	case r.URL.Path == "/api/tunnels" && r.Method == "GET":
+		AuthMiddleware(s.api.HandleListTunnels)(w, r)
+	case r.URL.Path == "/api/tunnels" && r.Method == "POST":
+		AuthMiddleware(s.api.HandleReserve)(w, r)
+
+	// Request inspector endpoints
+	case strings.HasPrefix(r.URL.Path, "/api/requests/") && r.Method == "GET":
+		AuthMiddleware(s.api.HandleGetRequestLogs)(w, r)
+
+	// Organization endpoints
+	case r.URL.Path == "/api/orgs" && r.Method == "GET":
+		AuthMiddleware(s.api.HandleListOrganizations)(w, r)
+	case r.URL.Path == "/api/orgs" && r.Method == "POST":
+		AuthMiddleware(s.api.HandleCreateOrganization)(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/orgs/") && strings.HasSuffix(r.URL.Path, "/members") && r.Method == "GET":
+		AuthMiddleware(s.api.HandleGetOrganizationMembers)(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/orgs/") && strings.HasSuffix(r.URL.Path, "/members") && r.Method == "POST":
+		AuthMiddleware(s.api.HandleAddOrganizationMember)(w, r)
+	case strings.HasPrefix(r.URL.Path, "/api/orgs/") && r.Method == "GET":
+		AuthMiddleware(s.api.HandleGetOrganization)(w, r)
+
+	default:
+		http.Error(w, "Not found", http.StatusNotFound)
+	}
+}
+
+// serveDashboard serves the React dashboard
+func (s *Server) serveDashboard(w http.ResponseWriter, r *http.Request) {
+	// Serve static files from web/dist
+	fs := http.FileServer(http.Dir("./web/dist"))
+	http.StripPrefix("/dashboard", fs).ServeHTTP(w, r)
 }
 
 // ServeHTTP makes HTTPProxy implement http.Handler

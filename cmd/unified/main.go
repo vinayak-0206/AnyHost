@@ -100,11 +100,35 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create server: %w", err)
 	}
 
-	// Add default dev token if no token file
-	if cfg.Auth.Mode == "token" && cfg.Auth.TokenFile == "" {
-		logger.Warn("no token file configured, adding default development token")
-		if err := srv.AddToken("dev-token", "dev-user"); err != nil {
-			logger.Warn("failed to add development token", slog.Any("error", err))
+	// Load tokens from AUTH_TOKENS environment variable or add default dev token
+	if cfg.Auth.Mode == "token" {
+		if authTokens := os.Getenv("AUTH_TOKENS"); authTokens != "" {
+			// Format: "token1:user1,token2:user2" or "token1:user1\ntoken2:user2"
+			tokens := strings.Split(strings.ReplaceAll(authTokens, "\n", ","), ",")
+			for _, t := range tokens {
+				t = strings.TrimSpace(t)
+				if t == "" || strings.HasPrefix(t, "#") {
+					continue
+				}
+				parts := strings.SplitN(t, ":", 2)
+				token := strings.TrimSpace(parts[0])
+				userID := token
+				if len(parts) == 2 {
+					userID = strings.TrimSpace(parts[1])
+				}
+				if token != "" {
+					if err := srv.AddToken(token, userID); err != nil {
+						logger.Warn("failed to add token", slog.String("user", userID), slog.Any("error", err))
+					} else {
+						logger.Info("added auth token", slog.String("user", userID))
+					}
+				}
+			}
+		} else if cfg.Auth.TokenFile == "" {
+			logger.Warn("no token file configured, adding default development token")
+			if err := srv.AddToken("dev-token", "dev-user"); err != nil {
+				logger.Warn("failed to add development token", slog.Any("error", err))
+			}
 		}
 	}
 

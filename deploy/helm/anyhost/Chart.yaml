@@ -1,0 +1,18 @@
+apiVersion: v2
+name: anyhost
+description: A Helm chart for AnyHost - Self-hosted tunnel service for teams
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - tunnel
+  - ngrok
+  - proxy
+  - development
+  - self-hosted
+home: https://github.com/anyhost/gotunnel
+sources:
+  - https://github.com/anyhost/gotunnel
+maintainers:
+  - name: AnyHost Team
+    email: support@anyhost.dev
