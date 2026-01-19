@@ -43,3 +43,4 @@ bin/
 tokens.txt
 *.pem
 *.key
+deploy/terraform/oracle-cloud/terraform.tfvars
