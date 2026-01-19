@@ -207,9 +207,17 @@ type ServerStats struct {
 
 // AddToken adds a token to the authenticator (if using token auth).
 func (s *Server) AddToken(token, userID string) error {
+	// Check if it's a direct TokenAuthenticator
 	if ta, ok := s.auth.(*TokenAuthenticator); ok {
 		ta.AddToken(token, userID)
 		return nil
+	}
+	// Check if it's a DatabaseAuthenticator with a TokenAuthenticator fallback
+	if da, ok := s.auth.(*DatabaseAuthenticator); ok {
+		if ta, ok := da.fallback.(*TokenAuthenticator); ok {
+			ta.AddToken(token, userID)
+			return nil
+		}
 	}
 	return fmt.Errorf("server is not using token authentication")
 }
